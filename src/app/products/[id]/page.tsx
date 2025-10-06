@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ShoppingCart, Minus, Plus, Check } from "lucide-react";
@@ -13,6 +13,7 @@ import { Product, ProductSize } from "@/types/types";
 import RelatedProducts from "@/components/RelatedProducts";
 import { VelocityScroll } from "@/components/magicui/scroll-based-velocity";
 import { Dots_v2 } from "@/components/Dots_v2";
+import { dataLayerPush } from "@/data/main";
 
 export default function ProductDetailPage() {
   const { id: product_id } = useParams();
@@ -23,15 +24,18 @@ export default function ProductDetailPage() {
   const [selectedSize, setSelectedSize] = useState<ProductSize | null>(null);
   const [quantity, setQuantity] = useState(1);
   const { addToCart } = useCart();
+  
+  // Add a ref to track if view_item event has been pushed
+  const viewItemPushed = useRef(false);
+
+  const isShoes = product?.category.toLowerCase() === "shoes";
 
   const noStock = (size: ProductSize, stock: number) => {
     if (stock === 0) {
-      console.log("out of stock")
-      return toast.warning("out of stock")
+      return toast.warning("Out of stock");
     }
-
-    setSelectedSize(size)
-  }
+    setSelectedSize(size);
+  };
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -47,6 +51,19 @@ export default function ProductDetailPage() {
         }
 
         setProduct(data);
+
+        // ✅ PUSH view_item EVENT ONLY ONCE
+        if (!viewItemPushed.current) {
+          dataLayerPush("view_item", {
+            code: data.id,
+            name: data.name,
+            price: data.discountPrice ?? data.price,
+            category: data.category,
+            subCategory: "",
+            variant: ""
+          });
+          viewItemPushed.current = true;
+        }
       } catch (error) {
         console.error("Error fetching product:", error);
         toast.error("Product not found or API error.");
@@ -55,29 +72,90 @@ export default function ProductDetailPage() {
       }
     };
 
-    if (productId) fetchProduct();
+    if (productId) {
+      // Reset the ref when productId changes
+      viewItemPushed.current = false;
+      fetchProduct();
+    }
   }, [productId]);
-
-  console.log(product?.sizes[0].stock)
 
   if (loading) return <Dots_v2 />;
   if (!product) return <p className="text-center mt-10">Product not found</p>;
 
-  const isShoes = product.category.toLowerCase() === "shoes";
+  const handleAddToCart = () => {
+    if (isShoes && !selectedSize) {
+      toast.warning("Please select a size before adding to cart!");
+      return;
+    }
 
+    const bagDefaultSize = product.sizes.find(size => size.size === "Default");
+    const currentStock = isShoes
+      ? selectedSize?.stock
+      : bagDefaultSize?.stock;
+
+    if (quantity > (currentStock || 0)) {
+      toast.error("Not enough stock available.");
+      return;
+    }
+
+    addToCart({
+      id: product.id,
+      name: product.name,
+      price: product.discountPrice ?? product.price,
+      image: product.images[0],
+      size: isShoes ? selectedSize?.size : "Default",
+      quantity,
+      category: product.category
+    });
+
+    // ✅ PUSH add_to_cart EVENT ONLY ON CLICK
+    dataLayerPush("add_to_cart", {
+      code: product.id,
+      name: product.name,
+      price: product.discountPrice ?? product.price,
+      quantity,
+      category: product.category,
+      subCategory: "",
+      variant: isShoes ? selectedSize?.size : "Default"
+    });
+
+    toast.success("Added to cart!");
+  };
+
+  const handleBuyNow = () => {
+    if (isShoes && !selectedSize) {
+      toast.warning("Please select a size before proceeding!");
+      return;
+    }
+
+    // ✅ PUSH begin_checkout EVENT ONLY ON CLICK
+    dataLayerPush("begin_checkout", [
+      {
+        code: product.id,
+        name: product.name,
+        price: product.discountPrice ?? product.price,
+        quantity,
+        category: product.category,
+        subCategory: "",
+        variant: isShoes ? selectedSize?.size : "Default"
+      }
+    ]);
+
+    router.push(
+      `/checkout?product=${product.id}${isShoes ? `&size=${selectedSize?.size}` : ''}&quantity=${quantity}`
+    );
+  };
 
   return (
     <>
-
       <div className="flex justify-center">
-
-        <div className=" w-full  rounded-2xl bg-white flex flex-col lg:flex-row justify-center items-center lg:items-start gap-8">
+        <div className="w-full rounded-2xl bg-white flex flex-col lg:flex-row justify-center items-center lg:items-start gap-8">
           <ProductImageSlider product={{ product_name: product.name, images: product.images }} />
 
           <div className="p-4 flex flex-col">
             <Breadcrumb />
             <h1 className="text-2xl font-bold mb-2">{product.productCode}</h1>
-            <p className="text-gray-600 mb-4  lg:max-w-96">{product.description}</p>
+            <p className="text-gray-600 mb-4 lg:max-w-96">{product.description}</p>
             {product.discountPrice ? (
               <>
                 <p className="text-lg font-bold line-through">৳ {product.price}</p>
@@ -87,8 +165,7 @@ export default function ProductDetailPage() {
               <p className="text-3xl font-bold">৳ {product.price}</p>
             )}
 
-
-            {/* Size Selection - Only for Shoes */}
+            {/* Size Selection */}
             {isShoes && (
               <div className="mt-4">
                 <p className="font-semibold text-xl">Select Size:</p>
@@ -99,13 +176,13 @@ export default function ProductDetailPage() {
                     .map((size) => (
                       <button
                         key={size.id}
-                        className={`px-3 py-1 border rounded-md text-xl transition-all duration-200 ${selectedSize?.id === size.id
-                          ? "bg-black text-white border-black"
-                          : size.stock > 0
+                        className={`px-3 py-1 border rounded-md text-xl transition-all duration-200 ${
+                          selectedSize?.id === size.id
+                            ? "bg-black text-white border-black"
+                            : size.stock > 0
                             ? "hover:bg-gray-200"
                             : "opacity-50 cursor-not-allowed"
-                          }`}
-                        // disabled={size.stock === 0}
+                        }`}
                         onClick={() => noStock(size, size.stock)}
                       >
                         {size.size}
@@ -114,7 +191,6 @@ export default function ProductDetailPage() {
                 </div>
               </div>
             )}
-
 
             {/* Quantity Selector */}
             <div className="flex items-center justify-start mt-4 gap-3">
@@ -133,12 +209,10 @@ export default function ProductDetailPage() {
                 size="icon"
                 onClick={() => {
                   const maxQuantity = isShoes
-                    ? (selectedSize?.stock || 0)
+                    ? selectedSize?.stock || 0
                     : product.sizes.find(size => size.size === "Default")?.stock || 0;
 
-                  if (quantity < maxQuantity) {
-                    setQuantity((prev) => prev + 1);
-                  }
+                  if (quantity < maxQuantity) setQuantity((prev) => prev + 1);
                 }}
                 className="w-8 h-8"
               >
@@ -146,37 +220,11 @@ export default function ProductDetailPage() {
               </Button>
             </div>
 
-            {/* Buttons */}
+            {/* Action Buttons */}
             <div className="flex gap-4">
               <Button
                 variant="custom"
-                onClick={() => {
-                  if (isShoes && !selectedSize) {
-                    toast.warning("Please select a size before adding to cart!");
-                    return;
-                  }
-
-                  const bagDefaultSize = product.sizes.find(size => size.size === "Default");
-                  const currentStock = isShoes
-                    ? selectedSize?.stock
-                    : bagDefaultSize?.stock;
-
-                  if (quantity > (currentStock || 0)) {
-                    toast.error("Not enough stock available.");
-                    return;
-                  }
-
-                  addToCart({
-                    id: product.id,
-                    name: product.name,
-                    price: product.discountPrice ?? product.price,
-                    image: product.images[0],
-                    size: isShoes ? selectedSize?.size : "Default",
-                    quantity,
-                    category: product.category
-                  });
-                  toast.success("Added to cart!");
-                }}
+                onClick={handleAddToCart}
                 size="lg"
                 className="w-full mt-6 flex items-center gap-2"
               >
@@ -188,16 +236,7 @@ export default function ProductDetailPage() {
                   variant="custom"
                   size="lg"
                   className="w-full mt-6 flex items-center gap-2"
-                  onClick={() => {
-                    if (isShoes && !selectedSize) {
-                      toast.warning("এগিয়ে যাওয়ার আগে একটি সাইজ নির্বাচন করুন।");
-                      return;
-                    }
-                    router.push(
-                      `/checkout?product=${product.id}${isShoes ? `&size=${selectedSize?.size}` : ''
-                      }&quantity=${quantity}`
-                    );
-                  }}
+                  onClick={handleBuyNow}
                 >
                   BUY NOW
                 </Button>
@@ -210,14 +249,19 @@ export default function ProductDetailPage() {
               </p>
               <div className="text-lg flex">
                 <span className="font-semibold">Stock:</span>
-                {
-                  isShoes ? selectedSize ? selectedSize.stock > 0 ? <p className="text-green-400 flex ml-2">In Stock <Check /></p> : <p>Out of Stock</p> : " Select a size" : ""
-                }
+                {isShoes
+                  ? selectedSize
+                    ? selectedSize.stock > 0
+                      ? <p className="text-green-400 flex ml-2">In Stock <Check /></p>
+                      : <p>Out of Stock</p>
+                    : " Select a size"
+                  : ""}
               </div>
             </div>
           </div>
         </div>
       </div>
+
       <VelocityScroll>BagNStep</VelocityScroll>
       <RelatedProducts fetchUrl={`${process.env.NEXT_PUBLIC_API_URL}/products/related?category=${product.category}&exclude=${product.id}`} />
     </>

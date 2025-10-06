@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,6 @@ import Image from "next/image";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-
 import { Dots_v2 } from "./Dots_v2";
 import {
   Select,
@@ -18,12 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-
 import { bangladeshDistricts } from '@/data/district'
 import { CartItem } from "@/types/types";
-
-
-
+import { dataLayerPush } from "@/data/main";
 
 export default function CheckoutPageContent() {
   const searchParams = useSearchParams();
@@ -33,76 +29,92 @@ export default function CheckoutPageContent() {
   const productId = searchParams.get("product");
   const selectedSize = searchParams.get("size");
   const quantity = Number(searchParams.get("quantity")) || 1;
+  const eventFired = searchParams.get("eventFired") === "true";
 
   const [selectedProducts, setSelectedProducts] = useState<CartItem[]>([]);
   const [selectedShipping, setSelectedShipping] = useState("70");
   const [formData, setFormData] = useState({
     name: "",
     mobile: "",
-    address: "",   // House/Village
-    thana: "",     // Thana/Upazila
-    district: "",  // District
+    address: "",
+    thana: "",
+    district: "",
     note: ""
   });
 
   const [loading, setLoading] = useState(true);
+  
+  // Add a ref to track if begin_checkout event has been pushed
+  const beginCheckoutPushed = useRef(false);
 
-useEffect(() => {
-  async function fetchProductIfNeeded() {
-    if (cart.length === 0 && !productId) {
-      setLoading(false);
-      return;
-    }
+  useEffect(() => {
+    async function fetchProductIfNeeded() {
+      if (cart.length === 0 && !productId) {
+        setLoading(false);
+        return;
+      }
 
-    let products: CartItem[] = [];
+      let products: CartItem[] = [];
 
-    if (productId) {
-      let product = cart.find((item) => item.id === productId);
+      if (productId) {
+        let product = cart.find((item) => item.id === productId);
 
-      if (!product) {
-        try {
-          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/products/${productId}`);
-          if (response.ok) {
-            const data = await response.json();
-            console.log("data : ", data);
+        if (!product) {
+          try {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/products/${productId}`);
+            if (response.ok) {
+              const data = await response.json();
 
-            product = {
-              id: data.id,
-              name: data.name,
-              price: data.discountPrice ?? data.price,
-              image: data.images[0],
-              quantity: quantity, // Make sure quantity is defined
-              size: selectedSize ?? "Default",
-              category: data.category,
+              product = {
+                id: data.id,
+                name: data.name,
+                price: data.discountPrice ?? data.price,
+                image: data.images[0],
+                quantity: quantity,
+                size: selectedSize ?? "Default",
+                category: data.category,
+              }
             }
+          } catch (error) {
+            console.error("Error fetching product:", error);
           }
-        } catch (error) {
-          console.error("Error fetching product:", error);
         }
+
+        if (product) {
+          products = [{
+            ...product,
+            productId: product.id,
+            size: product.category?.toLowerCase() === "shoes" ? selectedSize : "Default"
+          }];
+        }
+      } else {
+        products = cart.map(item => ({
+          ...item,
+          productId: item.id,
+          size: item.category?.toLowerCase() === "shoes" ? item.size : "Default"
+        }));
       }
 
-      if (product) {
-        products = [{
-          ...product,
-          productId: product.id,
-          size: product.category?.toLowerCase() === "shoes" ? selectedSize : "Default"
-        }];
+      setSelectedProducts(products);
+      setLoading(false);
+
+      // ✅ PUSH begin_checkout EVENT ONLY ONCE AND ONLY IF NOT ALREADY FIRED
+      if (products.length > 0 && !beginCheckoutPushed.current && !eventFired) {
+        dataLayerPush("begin_checkout", products.map(item => ({
+          code: item.id,
+          name: item.name,
+          price: item.discountPrice ?? item.price,
+          quantity: item.quantity,
+          category: item.category || "",
+          subCategory: "",
+          variant: item.size || "Default"
+        })));
+        beginCheckoutPushed.current = true;
       }
-    } else {
-      products = cart.map(item => ({
-        ...item,
-        productId: item.id,
-        size: item.category?.toLowerCase() === "shoes" ? item.size : "Default"
-      }));
     }
 
-    setSelectedProducts(products);
-    setLoading(false);
-  }
-
-  fetchProductIfNeeded();
-}, [productId, cart, selectedSize, quantity]);
-
+    fetchProductIfNeeded();
+  }, [productId, cart, selectedSize, quantity, eventFired]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -126,7 +138,6 @@ useEffect(() => {
     ]
       .filter(Boolean)
       .join(", ");
-
 
     if (selectedProducts.length === 0) {
       toast.error("No Products", {
@@ -155,20 +166,24 @@ useEffect(() => {
       });
 
       if (response.ok) {
-        const order = await response.json(); // ✅ Get the order data from backend
+        const order = await response.json();
 
-     
- 
-        
+        // ✅ PUSH purchase EVENT
+        dataLayerPush("purchase", selectedProducts.map(item => ({
+          code: item.id,
+          name: item.name,
+          price: item.discountPrice ?? item.price,
+          quantity: item.quantity,
+          category: item.category || "",
+          subCategory: "",
+          variant: item.size || "Default"
+        })));
 
         toast.success("Order Placed Successfully!", {
           description: "We will contact you soon for confirmation.",
         });
 
         clearCart();
-
-        // ✅ Redirect to receipt page using order ID
-        console.log(order.order.id)
         router.push(`/order-confirmation/${order.order.id}`);
       } else {
         throw new Error("Failed to place order");
@@ -181,7 +196,6 @@ useEffect(() => {
     }
   };
 
-
   const subTotal = selectedProducts.reduce(
     (total, item) => total + (item.discountPrice ?? item.price) * item.quantity,
     0
@@ -190,8 +204,6 @@ useEffect(() => {
   const total = subTotal + Number(selectedShipping);
 
   if (loading) return <Dots_v2 />;
-
-  console.log(selectedProducts[0].discountPrice)
 
   return (
     <div className="max-w-5xl mx-auto p-6">
@@ -222,7 +234,6 @@ useEffect(() => {
                     <p className="font-semibold text-lg">
                       ৳{((product?.discountPrice ?? product.price) * product.quantity).toFixed(2)}
                     </p>
-
                   </div>
                 </div>
               ))}
@@ -306,10 +317,10 @@ useEffect(() => {
               />
             </div>
             <div>
-              <Label htmlFor="address">Thana/Upazila (থানা/উপজেলা) *</Label>
+              <Label htmlFor="thana">Thana/Upazila (থানা/উপজেলা) *</Label>
               <Input
                 type="text"
-                id="address"
+                id="thana"
                 name="thana"
                 placeholder="থানা/উপজেলা"
                 value={formData.thana}
@@ -319,22 +330,20 @@ useEffect(() => {
             </div>
 
             <div>
-              <Label htmlFor="address">District  ( জেলা ) *</Label>
+              <Label htmlFor="district">District  ( জেলা ) *</Label>
               <Select
                 value={formData.district}
                 onValueChange={(value) =>
                   setFormData((prev) => ({ ...prev, district: value }))
                 }
               >
-                <SelectTrigger className="">
+                <SelectTrigger>
                   <SelectValue placeholder="Select an option" />
                 </SelectTrigger>
                 <SelectContent>
-                  {
-                    bangladeshDistricts.map((district, idx) => {
-                      return <SelectItem key={idx} value={district}>{district}</SelectItem>
-                    })
-                  }
+                  {bangladeshDistricts.map((district, idx) => {
+                    return <SelectItem key={idx} value={district}>{district}</SelectItem>
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -352,7 +361,7 @@ useEffect(() => {
             </div>
 
             <p className="text-sm text-gray-600">
-              কোন প্রকার এডভান্স পেমেন্ট ছাড়াই সারাদেশে হোম ডেলিভারি। অর্ডার করুন নিশ্চিন্তে!
+              কোন প্রকার এডভান্স পেমেন্ট ছাড়াই সারাদেশে হোম ডেলিভারি। অর্ডার করুন নিশ্চিন্তে!
             </p>
 
             <Button type="submit" className="w-full">
