@@ -1,0 +1,119 @@
+/// Function Defination
+
+export function dataLayerPush(eventType, items = []) {
+  const validEvents = [
+    "view_item",
+    "add_to_cart",
+    "remove_from_cart",
+    "view_cart",
+    "add_to_wishlist",
+    "remove_from_wishlist",
+    "begin_checkout",
+    "purchase",
+    "page_view"
+  ];
+
+  const event = validEvents.includes(eventType) ? eventType : "custom_event";
+
+  // Ensure dataLayer exists
+  window.dataLayer = window.dataLayer || [];
+
+  if (event === "page_view") {
+    window.dataLayer.push({
+      event: "page_view",
+      page: {
+        page_path: window.location.pathname,
+        page_title: document.title,
+        page_location: window.location.href
+      }
+    });
+
+    console.log("Data Layer Push: page_view", {
+      path: window.location.pathname,
+      title: document.title,
+      url: window.location.href
+    });
+    return;
+  }
+
+  // Normalize single vs multiple items
+  const normalizedItems = Array.isArray(items) ? items : [items];
+
+  const ecommerceItems = normalizedItems.map((itemData) => ({
+    item_id: itemData.code || "",
+    item_name: itemData.name || "",
+    price: Number(itemData.price) || 0,
+    quantity: Number(itemData.quantity) || 1,
+    item_category: itemData.category || "",
+    item_category2: itemData.subCategory || "",
+    item_brand: itemData.brand || "",
+    item_variant: itemData.variant || ""
+  }));
+
+  window.dataLayer.push({
+    event,
+    ecommerce: {
+      currency: "BDT",
+      items: ecommerceItems
+    }
+  });
+
+  console.log("Data Layer Push:", event, ecommerceItems);
+}
+
+
+
+
+
+
+
+////// Function Calling
+
+// For Each Page
+dataLayerPush("page_view");
+
+
+// For Individual Product Page
+dataLayerPush("view_item", {
+      code: product.id,
+      name: product.title,
+      price: product.selling_price,
+      category: product.category,
+      subCategory: product.sub_category,
+    });
+
+
+// For Add To Cart
+dataLayerPush("add_to_cart", {
+      code: id,
+      name: name,
+      price: price,
+      quantity: quantity, // default quantity
+      category: product.category,
+      subCategory: product.sub_category,
+      variant: size
+    });
+
+
+// For Initial Checkout Page
+dataLayerPush("begin_checkout", carts.map(item => ({
+        code: item.id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        category: item.category,
+        subCategory: item.sub_category,
+        variant: item.size
+})));
+
+
+// For Purchase Function
+	dataLayerPush("purchase", orders.map(item => ({
+                    code: item.product_id,
+                    name: item.product_title,
+                    price: item.product_price,
+                    quantity: item.product_quantity,
+                    category: item.product_category,
+                    subCategory: item.product_sub_category,
+                    variant: item.product_size
+                })));
